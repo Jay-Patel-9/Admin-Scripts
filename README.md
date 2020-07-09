@@ -1,7 +1,7 @@
 # Admin-Scripts
 System Admin Friendly Scripts
 
-# Windows-Server-Health-Check.ps1 
+# Windows-Server-Health-Status.ps1 
 - It is a powershell script to check the overall status of the windows server by checking:
 1. OS version & info 
 2. CPU Usage
