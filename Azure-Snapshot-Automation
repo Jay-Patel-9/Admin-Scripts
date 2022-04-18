@@ -1,0 +1,111 @@
+$connectionName = "AzureRunAsConnection"
+try
+{
+    # Get the connection "AzureRunAsConnection "
+    $servicePrincipalConnection = Get-AutomationConnection -Name $connectionName
+    # "Logging in to Azure..."
+    $connectionResult =  Connect-AzAccount -Tenant $servicePrincipalConnection.TenantID `
+                             -ApplicationId $servicePrincipalConnection.ApplicationID   `
+                             -CertificateThumbprint $servicePrincipalConnection.CertificateThumbprint `
+                             -ServicePrincipal
+    echo "Login Successful!"
+
+}
+catch {
+    if (!$servicePrincipalConnection)
+    {
+        $ErrorMessage = "Connection $connectionName not found."
+        throw $ErrorMessage
+    } else{
+		echo "Login Failed!"
+        Write-Error -Message $_.Exception
+        throw $_.Exception
+    }
+}
+
+# Variables for creating snapshot
+$resourceGroupName = 'USEAST-RG1'
+$location = 'East US'
+$vmName = "Instance-Name"
+$snaptime=$(get-date -Format 'yyyyMMdd-hhmm')
+$snapshotName = "Instance-Name-$(get-date -Format 'yyyyMMdd-HHmm')-UTC"
+$removesnapshotafterhours = '-20'
+
+# Variables for creating Disk
+# $SnapshotResourceGroup = $resourceGroupName
+# $DiskNameOS = "$snapshotName-disk"
+
+# Create snapshot
+# Get VM information
+echo "Collecting VM Info"
+$vm = Get-AzVM `
+    -ResourceGroupName $resourceGroupName `
+    -Name $vmName
+echo "VM Info: $vm"
+
+# Generate snapshot config
+$snapshot =  New-AzSnapshotConfig `
+    -SourceUri $vm.StorageProfile.DataDisks.ManagedDisk.Id `
+    -Location $location `
+    -CreateOption copy `
+	-SkuName Standard_ZRS `
+	-Tag @{Name="$snapshotName-SNAPSHOT"}
+	# -Incremental 
+	#Uncomment above line to create incremental backup (Haven't tested by Jay) try to use standard HDD with incremental backups.
+
+echo "Snapshot config: $snapshot"
+
+# Create snapshot
+echo "Taking snapshot.."
+New-AzSnapshot `
+    -Snapshot $snapshot `
+    -SnapshotName $snapshotName `
+    -ResourceGroupName $resourceGroupName
+
+#Remove only Instance-Name backup older than given days
+echo "Checking for backup older than $removesnapshotafterhours hours from current time $(Get-Date), Following snapshot will be deleted."
+$removedsnap=Get-AzSnapshot -ResourceGroupName $resourceGroupName | Where-Object TimeCreated -lt (Get-Date).AddHours($removesnapshotafterhours) | Where-Object Name -Like "Instance-Name*"
+Get-AzSnapshot -ResourceGroupName $resourceGroupName | Where-Object TimeCreated -lt (Get-Date).AddHours($removesnapshotafterhours) | Where-Object Name -Like "Instance-Name*" | remove-azsnapshot -force
+
+################Webhook Alert################
+$webhookurl="WEBHOOK-URLHERE"
+$oldsnap=Get-AzSnapshot -ResourceGroupName $resourceGroupName | Format-Table -Property Name,TimeCreated
+$oldsnap=($oldsnap | FL -Property Name |Out-String).trim()
+$removedsnap=($removedsnap | FL -Property Name,TimeCreated |Out-String).trim()
+
+[String]$var = "Text which appears in the message content"
+$JSONBody = [PSCustomObject][Ordered]@{
+"@type" = "MessageCard"
+"@context" = "<http://schema.org/extensions>"
+"summary" = "Azure-Snapshot Information"
+"themeColor" = '0078D7'
+"title" = "List of Available snapshots in Azure ($resourceGroupName)"
+"text" = "<pre>$oldsnap</pre><br><strong>Following snapshots will be removed in this run</strong><br><pre>$removedsnap</pre>"
+}
+
+$TeamMessageBody = ConvertTo-Json $JSONBody
+
+$parameters = @{
+"URI" = $webhookurl
+"Method" = 'POST'
+"Body" = $TeamMessageBody
+"ContentType" = 'application/json'
+}
+
+# Waiting for snapshot to be available
+Start-Sleep 10
+
+Invoke-RestMethod @parameters
+#################################################
+
+#Notes:
+# - Change Instance-Name to your VM name but in Snapshot remove part make sure you enter specific keyword from your the snapshot name to identify the snapshot.
+#   For ex: my snapshot name is: test-dbnode-18042022-UTC, I will only add "test-dbnode" in the remove part.
+
+#TODO
+# - Add function for snapshot creation,snapshot remove process & webhook alert for better readability.
+
+#Reference:
+# - https://ystatit.medium.com/azure-use-automation-to-snapshot-and-create-disk-periodically-92e56f5d70e2
+# - https://www.jorgebernhardt.com/how-to-create-snapshots-for-azure-managed-disks/
+# - https://stackoverflow.com/questions/52428463/delete-azure-snapshots-older-than-x-days
