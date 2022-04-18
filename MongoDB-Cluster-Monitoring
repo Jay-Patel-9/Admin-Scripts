@@ -1,0 +1,66 @@
+#!/bin/bash
+
+#Author: Jay Patel <itwithjay@gmail.com>
+
+#set -x
+HOSTNAME=127.0.0.1 #Change-me
+TIME=$(date +%d%m%Y'-'%H''%M''%S)
+latestmongofile="/tmp/mongo-newfile"
+oldmongofile="/tmp/mongo-oldfile"
+WEBHOOK_URL="WEBHOOK-URL-HERE" #Change-me
+
+alertstatus=TRUE
+touch "$latestmongofile" 
+touch "$oldmongofile"
+function sendalert {
+    if [ $alertstatus == "TRUE" ]; then
+        MESSAGE=$(echo $message | sed 's/"/\"/g' | sed "s/'/\'/g" )
+        # IP=$(echo $ip)
+        TITLE="$TIME- MongoCluster-Status"
+        JSON="{\"title\": \"${TITLE}\", \"themeColor\": \"${COLOR}\", \"text\": \"${MESSAGE}\" }"
+        curl -H "Content-Type: application/json" -d "${JSON}" "${WEBHOOK_URL}"
+    else
+        return 1
+    fi
+}
+
+function getmongostatus {
+	mongostatus=$(mongo --host $HOSTNAME --eval "rs.status()" 2> /tmp/mongoerror | grep -e name -e stateStr)
+	if [ $? -eq 0 ]; then
+		echo $mongostatus > $latestmongofile
+		#echo $mongostatus | md5sum
+	else
+		echo "[!] Unable to fetch cluster status"
+		error=$(cat /tmp/mongoerror)
+		cp /tmp/mongoerror ~/mongoerror.$TIME
+		COLOR=cc3300
+		message="Unable to fetch cluster status, Below is the received error for host <strong>$HOSTNAME</strong>:<pre>$error</pre>"
+		sendalert $message
+		exit 1
+	fi
+}
+
+function finddiff {
+	grep -Fxvf "$latestmongofile" "$oldmongofile"
+	diffstat=$?
+}
+
+getmongostatus
+finddiff
+
+if [ $diffstat -eq 0 ]; then
+	echo "[+] Something changed in the mongodb cluster.!"
+	pval="$(cat $oldmongofile | tr -d '"')"
+	cval="$(cat $latestmongofile | tr -d '"' )"
+	message="<strong>Previous Value:</strong><pre>$pval</pre><strong>Current Value</strong><pre>$cval</pre><br><strong><h2>This is one time warning for change in mongodb cluster Please check this with IT immediately.</h2></strong>"
+	echo "$message"
+	COLOR=EE4B2B
+	sendalert $message
+	cp ~/$latestmongofile ~/mongolatestfile.$TIME
+	cp ~/$oldmongofile ~/mongooldfile.$TIME
+	#cat /tmp/mongstatus /tmp/mongostatus2
+else
+	echo "[#] Cluster status is unchanged."
+fi
+
+echo $mongostatus > $oldmongofile
