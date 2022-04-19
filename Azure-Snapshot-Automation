@@ -28,7 +28,7 @@ $resourceGroupName = 'USEAST-RG1'
 $location = 'East US'
 $vmName = "Instance-Name"
 $snaptime=$(get-date -Format 'yyyyMMdd-hhmm')
-$snapshotName = "Instance-Name-$(get-date -Format 'yyyyMMdd-HHmm')-UTC"
+$snapshotName = "${vmName}-$(get-date -Format 'yyyyMMdd-HHmm')-UTC"
 $removesnapshotafterhours = '-20'
 
 # Variables for creating Disk
@@ -64,8 +64,8 @@ New-AzSnapshot `
 
 #Remove only Instance-Name backup older than given days
 echo "Checking for backup older than $removesnapshotafterhours hours from current time $(Get-Date), Following snapshot will be deleted."
-$removedsnap=Get-AzSnapshot -ResourceGroupName $resourceGroupName | Where-Object TimeCreated -lt (Get-Date).AddHours($removesnapshotafterhours) | Where-Object Name -Like "Instance-Name*"
-Get-AzSnapshot -ResourceGroupName $resourceGroupName | Where-Object TimeCreated -lt (Get-Date).AddHours($removesnapshotafterhours) | Where-Object Name -Like "Instance-Name*" | remove-azsnapshot -force
+$removedsnap=Get-AzSnapshot -ResourceGroupName $resourceGroupName | Where-Object TimeCreated -lt (Get-Date).AddHours($removesnapshotafterhours) | Where-Object Name -Like "${vmName}*"
+Get-AzSnapshot -ResourceGroupName $resourceGroupName | Where-Object TimeCreated -lt (Get-Date).AddHours($removesnapshotafterhours) | Where-Object Name -Like "${vmName}*" | remove-azsnapshot -force
 
 ################Webhook Alert################
 $webhookurl="WEBHOOK-URLHERE"
@@ -98,12 +98,9 @@ Start-Sleep 10
 Invoke-RestMethod @parameters
 #################################################
 
-#Notes:
-# - Change Instance-Name to your VM name but in Snapshot remove part make sure you enter specific keyword from your the snapshot name to identify the snapshot.
-#   For ex: my snapshot name is: test-dbnode-18042022-UTC, I will only add "test-dbnode" in the remove part.
 
 #TODO
-# - Add function for snapshot creation,snapshot remove process & webhook alert for better readability.
+# - Create separate function for snapshot creation,snapshot remove process & webhook alert for better readability.
 
 #Reference:
 # - https://ystatit.medium.com/azure-use-automation-to-snapshot-and-create-disk-periodically-92e56f5d70e2
